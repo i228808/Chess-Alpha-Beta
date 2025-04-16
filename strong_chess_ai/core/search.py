@@ -133,7 +133,15 @@ def quiesce(state: GameState, alpha: int, beta: int, stats: Optional[SearchStats
     return alpha
 
 def find_best_move(state: GameState, max_depth: int = 5, time_limit_s: float = 5.0) -> SearchStats:
-    """Iterative deepening with PV move ordering and TT, returns SearchStats."""
+    """Iterative deepening with PV move ordering and TT, returns SearchStats. Uses book if available."""
+    try:
+        from strong_chess_ai.core import book
+        book_move = book.lookup(state)
+        if book_move:
+            stats = SearchStats(nodes=0, cutoffs=0, depth=0, pv=[book_move])
+            return stats
+    except ImportError:
+        pass
     stats = SearchStats()
     pv = []
     start_time = time.time()
