@@ -126,31 +126,78 @@ def piece_square(board: chess.Board, phase: Literal["MID", "END"]) -> int:
             score -= pst[chess.square_mirror(square)]
     return score
 
+def pawn_bitboards(board: chess.Board, color: chess.Color) -> int:
+    """Return a bitmask of the given color's pawns."""
+    return board.pawns & board.occupied_co[color]
+
+def _isolated_mask(file: int) -> int:
+    """Return bitmask for isolated pawn detection for a file (0=a, 7=h)."""
+    mask = 0
+    if file > 0:
+        mask |= chess.BB_FILES[file - 1]
+    if file < 7:
+        mask |= chess.BB_FILES[file + 1]
+    return mask
+
+def _doubled_count(file: int) -> int:
+    """Return the number of extra pawns on a file (doubled pawns count as n-1)."""
+    return max(0, bin(chess.BB_FILES[file]).count('1') - 1)
+
+def is_passed(board: chess.Board, sq: int, color: chess.Color) -> bool:
+    """Return True if the pawn on sq is a passed pawn for color."""
+    file = chess.square_file(sq)
+    rank = chess.square_rank(sq)
+    opp_color = not color
+    # Passed pawn: no enemy pawns on same or adjacent files ahead
+    mask = chess.BB_FILES[file]
+    if file > 0:
+        mask |= chess.BB_FILES[file - 1]
+    if file < 7:
+        mask |= chess.BB_FILES[file + 1]
+    if color == chess.WHITE:
+        in_front = mask & chess.BB_RANKS_MASKS[rank + 1]
+        for r in range(rank + 1, 8):
+            in_front |= mask & chess.BB_RANKS_MASKS[r]
+        return (board.pawns & board.occupied_co[opp_color] & in_front) == 0
+    else:
+        in_front = mask & chess.BB_RANKS_MASKS[rank - 1]
+        for r in range(rank - 1, -1, -1):
+            in_front |= mask & chess.BB_RANKS_MASKS[r]
+        return (board.pawns & board.occupied_co[opp_color] & in_front) == 0
+
 def pawn_structure(board: chess.Board) -> int:
-    """Evaluate pawn structure. Reward passed pawns, penalize doubled/isolated pawns."""
+    """Evaluate pawn structure with refined detection for isolated, doubled, and passed pawns.
+    -15 cp per isolated pawn
+    -10 cp per doubled pawn (each extra pawn on a file)
+    +20/40/80 cp bonus for a passed pawn on rank 5/6/7 (white) or 4/3/2 (black).
+    """
     score = 0
     for color in [chess.WHITE, chess.BLACK]:
         pawns = board.pieces(chess.PAWN, color)
-        files = [chess.square_file(sq) for sq in pawns]
-        file_counts = {f: files.count(f) for f in set(files)}
-        # Doubled pawns
-        doubled = sum(1 for c in file_counts.values() if c > 1)
+        pawn_files = [chess.square_file(sq) for sq in pawns]
+        file_counts = {f: pawn_files.count(f) for f in set(pawn_files)}
         # Isolated pawns
-        isolated = sum(1 for f in file_counts if all(abs(f-g) > 1 for g in file_counts if g != f))
-        # Passed pawns
-        passed = 0
+        isolated = 0
         for sq in pawns:
             file = chess.square_file(sq)
-            rank = chess.square_rank(sq)
-            if color == chess.WHITE:
-                blockers = [s for s in range(sq+8, 64, 8) if chess.square_file(s) == file]
-                if not any(board.piece_type_at(s) == chess.PAWN and board.color_at(s) == chess.BLACK for s in blockers):
-                    passed += 1
-            else:
-                blockers = [s for s in range(sq-8, -1, -8) if chess.square_file(s) == file]
-                if not any(board.piece_type_at(s) == chess.PAWN and board.color_at(s) == chess.WHITE for s in blockers):
-                    passed += 1
-        term = 15 * passed - 10 * doubled - 8 * isolated
+            mask = _isolated_mask(file)
+            # If no friendly pawns on adjacent files
+            if not any(sq2 for sq2 in pawns if chess.square_file(sq2) != file and (chess.BB_SQUARES[sq2] & mask)):
+                isolated += 1
+        # Doubled pawns
+        doubled = sum(max(0, count - 1) for count in file_counts.values())
+        # Passed pawns
+        passed_bonus = 0
+        for sq in pawns:
+            if is_passed(board, sq, color):
+                rank = chess.square_rank(sq) if color == chess.WHITE else 7 - chess.square_rank(sq)
+                if rank == 4:
+                    passed_bonus += 20
+                elif rank == 5:
+                    passed_bonus += 40
+                elif rank == 6:
+                    passed_bonus += 80
+        term = -15 * isolated - 10 * doubled + passed_bonus
         score += term if color == chess.WHITE else -term
     return score
 
