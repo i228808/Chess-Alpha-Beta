@@ -1,4 +1,5 @@
 [project]
+
 name = "strong_chess_ai"
 version = "0.1.0"
 description = "A strong chess AI using python-chess, pygame, and numpy."

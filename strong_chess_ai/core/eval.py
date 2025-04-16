@@ -272,7 +272,7 @@ def evaluate_endgame(board: chess.Board) -> int:
     # Only kings
     if pieces == [chess.KING, chess.KING]:
         return 0
-    # K vs K+N
+    # K vs K+N, K vs K+B, K vs K+NN
     if sorted(pieces) in ([chess.KING, chess.KING, chess.KNIGHT], [chess.KING, chess.KING, chess.BISHOP], [chess.KING, chess.KING, chess.KNIGHT, chess.KNIGHT]):
         return 0
     score = 0
@@ -300,21 +300,150 @@ def evaluate_endgame(board: chess.Board) -> int:
                     score += (120 if color == chess.WHITE else -120)
     return score
 
+    pieces = [pt for pt in range(1, 7) for _ in board.pieces(pt, chess.WHITE)] + [pt for pt in range(1, 7) for _ in board.pieces(pt, chess.BLACK)]
+    # Only kings
+    if pieces == [chess.KING, chess.KING]:
+        return 0
+    # K vs K+N, K vs K+B, K vs K+NN
+    if sorted(pieces) in ([chess.KING, chess.KING, chess.KNIGHT], [chess.KING, chess.KING, chess.BISHOP], [chess.KING, chess.KING, chess.KNIGHT, chess.KNIGHT]):
+        return 0
+    score = 0
+    # King activity bonus: -5cp × distance from centre
+    for color in [chess.WHITE, chess.BLACK]:
+        king_sq = board.king(color)
+        if king_sq is not None:
+            dist = KING_ENDGAME_TABLE[king_sq]
+            bonus = -5 * dist
+            score += bonus if color == chess.WHITE else -bonus
+    # Material and PST
+    score += material(board)
+    score += piece_square(board, "END")
+    # Passed pawns (scaled)
+    for color in [chess.WHITE, chess.BLACK]:
+        pawns = board.pieces(chess.PAWN, color)
+        for sq in pawns:
+            if is_passed(board, sq, color):
+                rank = chess.square_rank(sq) if color == chess.WHITE else 7 - chess.square_rank(sq)
+                if rank == 4:
+                    score += (30 if color == chess.WHITE else -30)
+                elif rank == 5:
+                    score += (60 if color == chess.WHITE else -60)
+                elif rank == 6:
+                    score += (120 if color == chess.WHITE else -120)
+    return score
+
+
+def tapered_weight(board: chess.Board) -> float:
+    """Return game phase weight for tapering: 1.0 = midgame, 0.0 = endgame."""
+    # Use non-pawn material left (scaled)
+    max_phase = 4 * PIECE_VALUES[chess.QUEEN] + 4 * PIECE_VALUES[chess.ROOK] + 4 * PIECE_VALUES[chess.BISHOP] + 4 * PIECE_VALUES[chess.KNIGHT]
+    phase_score = (
+        PIECE_VALUES[chess.QUEEN] * (len(board.pieces(chess.QUEEN, chess.WHITE)) + len(board.pieces(chess.QUEEN, chess.BLACK))) +
+        PIECE_VALUES[chess.ROOK] * (len(board.pieces(chess.ROOK, chess.WHITE)) + len(board.pieces(chess.ROOK, chess.BLACK))) +
+        PIECE_VALUES[chess.BISHOP] * (len(board.pieces(chess.BISHOP, chess.WHITE)) + len(board.pieces(chess.BISHOP, chess.BLACK))) +
+        PIECE_VALUES[chess.KNIGHT] * (len(board.pieces(chess.KNIGHT, chess.WHITE)) + len(board.pieces(chess.KNIGHT, chess.BLACK)))
+    )
+    return min(1.0, max(0.0, phase_score / max_phase))
+
+def bishop_pair(board: chess.Board) -> int:
+    bonus = 0
+    for color in [chess.WHITE, chess.BLACK]:
+        if len(board.pieces(chess.BISHOP, color)) >= 2:
+            bonus += 30 if color == chess.WHITE else -30
+    return bonus
+
+def central_control(board: chess.Board) -> int:
+    from .bitboard import CENTER_MASK, EXT_CENTER_MASK, count_bits
+    score = 0
+    for color in [chess.WHITE, chess.BLACK]:
+        attacks = 0
+        for piece_type in [chess.PAWN, chess.KNIGHT, chess.BISHOP, chess.ROOK, chess.QUEEN]:
+            for sq in board.pieces(piece_type, color):
+                attacks |= int(board.attacks(sq))
+        central = count_bits(attacks & CENTER_MASK)
+        extended = count_bits(attacks & EXT_CENTER_MASK)
+        bonus = 10 * central + 3 * extended
+        score += bonus if color == chess.WHITE else -bonus
+    return score
+
+def space_advantage(board: chess.Board) -> int:
+    # Count pawns beyond 4th (white) or before 5th (black)
+    score = 0
+    for color in [chess.WHITE, chess.BLACK]:
+        pawns = board.pieces(chess.PAWN, color)
+        for sq in pawns:
+            rank = chess.square_rank(sq)
+            if (color == chess.WHITE and rank >= 4) or (color == chess.BLACK and rank <= 3):
+                score += 8 if color == chess.WHITE else -8
+    return score
+
+def is_valid_square(sq):
+    return 0 <= sq < 64
+
+def outpost_bonus(board: chess.Board) -> int:
+    # Bonus for knights/bishops on outposts (supported by pawn, cannot be attacked by enemy pawn)
+    score = 0
+    for color in [chess.WHITE, chess.BLACK]:
+        opp = not color
+        pawns = board.pieces(chess.PAWN, color)
+        for piece_type in [chess.KNIGHT, chess.BISHOP]:
+            for sq in board.pieces(piece_type, color):
+                # Supported by pawn
+                if color == chess.WHITE:
+                    support = (is_valid_square(sq - 9) and sq - 9 in pawns) or (is_valid_square(sq - 7) and sq - 7 in pawns)
+                    safe = not ((is_valid_square(sq + 7) and sq + 7 in board.pieces(chess.PAWN, opp)) or (is_valid_square(sq + 9) and sq + 9 in board.pieces(chess.PAWN, opp)))
+                else:
+                    support = (is_valid_square(sq + 9) and sq + 9 in pawns) or (is_valid_square(sq + 7) and sq + 7 in pawns)
+                    safe = not ((is_valid_square(sq - 7) and sq - 7 in board.pieces(chess.PAWN, opp)) or (is_valid_square(sq - 9) and sq - 9 in board.pieces(chess.PAWN, opp)))
+                if support and safe:
+                    score += 18 if color == chess.WHITE else -18
+    return score
+
+def tactical_features(board: chess.Board) -> int:
+    # Hanging pieces: attacked and not defended
+    score = 0
+    for color in [chess.WHITE, chess.BLACK]:
+        opp = not color
+        for sq in chess.SQUARES:
+            piece = board.piece_at(sq)
+            if piece and piece.color == color and piece.piece_type != chess.KING:
+                if board.is_attacked_by(opp, sq) and not board.is_attacked_by(color, sq):
+                    score -= PIECE_VALUES.get(piece.piece_type, 0) // 8 if color == chess.WHITE else -PIECE_VALUES.get(piece.piece_type, 0) // 8
+    # TODO: Pins, forks, mate threats (bitboard-based, fast)
+    return score
+
 def evaluate(board: chess.Board) -> int:
-    """Evaluate the board and return centipawn score (White minus Black). Applies draw contempt (+/-20 cp). Calls evaluate_endgame() in endgame phase."""
-    ph = phase(board)
-    if ph == "END":
-        score = evaluate_endgame(board)
-    else:
-        score = (
-            material(board)
-            + piece_square(board, ph)
-            + pawn_structure(board)
-            + mobility(board)
-            + king_safety(board, ph)
-            + rook_placement(board)
-        )
+    """Tapered, multi-component evaluation for Search Engine V3."""
+    w = tapered_weight(board)
+    # Midgame and endgame features
+    mg = (
+        material(board) +
+        bishop_pair(board) +
+        piece_square(board, "MID") +
+        pawn_structure(board) +
+        mobility(board) +
+        king_safety(board, "MID") +
+        rook_placement(board) +
+        central_control(board) +
+        space_advantage(board) +
+        outpost_bonus(board) +
+        tactical_features(board)
+    )
+    eg = (
+        material(board) +
+        bishop_pair(board) +
+        piece_square(board, "END") +
+        pawn_structure(board) +
+        mobility(board) +
+        king_safety(board, "END") +
+        rook_placement(board) +
+        central_control(board) +
+        space_advantage(board) +
+        outpost_bonus(board) +
+        tactical_features(board)
+    )
+    score = int(w * mg + (1 - w) * eg)
     # Draw contempt: prefer not to draw
     if board.is_stalemate() or board.is_insufficient_material() or board.can_claim_draw():
         score += 20 if board.turn == chess.WHITE else -20
-    return int(score)
+    return score

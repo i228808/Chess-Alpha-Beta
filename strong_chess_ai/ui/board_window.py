@@ -3,12 +3,12 @@ from .view import ChessBoardCanvas, SidePanel
 from .controller import ChessController
 
 class BoardWindow(tk.Tk):
-    def __init__(self):
+    def __init__(self, threads=None):
         super().__init__()
         self.title("Chess AI Board")
         self.geometry(f"1040x640")
         self.resizable(False, False)
-        self.controller = ChessController(self)
+        self.controller = ChessController(self, threads=threads)
         self.board = ChessBoardCanvas(self, self.controller)
         self.board.pack(side=tk.LEFT, fill=tk.BOTH, expand=False)
         self.side_panel = SidePanel(self, self.controller)
@@ -37,8 +37,13 @@ class BoardWindow(tk.Tk):
         else:
             self.status.config(text="")
 
+import argparse
+
 def main():
-    app = BoardWindow()
+    parser = argparse.ArgumentParser(description="Chess AI Board")
+    parser.add_argument('--threads', type=int, default=None, help='Number of threads for parallel root search (default: cpu_count)')
+    args = parser.parse_args()
+    app = BoardWindow(threads=args.threads)
     app.mainloop()
 
 if __name__ == "__main__":

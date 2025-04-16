@@ -5,10 +5,11 @@ from strong_chess_ai.core.board import GameState
 from strong_chess_ai.core.search import find_best_move
 
 class ChessController:
-    def __init__(self, view):
+    def __init__(self, view, threads=None):
         self.view = view
         self.state = GameState()
         self.depth = 5
+        self.threads = threads
         self.ai_thread = None
         self.flipped = False
         self.move_history = []
@@ -29,7 +30,7 @@ class ChessController:
 
     def spawn_ai(self):
         def ai_move():
-            result = find_best_move(self.state, max_depth=self.depth, time_limit_s=3.0)
+            result = find_best_move(self.state, max_depth=self.depth, time_limit_s=3.0, threads=self.threads)
             move = result.pv[0] if result.pv else None
             if move:
                 with self.lock:

@@ -76,15 +76,55 @@ def alphabeta(state: GameState, depth: int, alpha: int, beta: int, ply: int = 0,
                 return entry.score, entry.best_move
     if depth == 0 or state.is_terminal():
         return quiesce(state, alpha, beta, stats), None
+
+    # Null-move pruning (not in check, enough material, not zugzwang)
+    if depth >= 3 and not state.board.is_check() and ce.material(state.board) > ce.PIECE_VALUES[chess.PAWN]:
+        non_pawns = sum(len(state.board.pieces(pt, True)) + len(state.board.pieces(pt, False))
+                        for pt in [chess.KNIGHT, chess.BISHOP, chess.ROOK, chess.QUEEN, chess.KING])
+        if non_pawns > 4:
+            state.board.push(chess.Move.null())
+            null_score = -alphabeta(state, depth - 2, -beta, -beta + 1, ply + 1, pv, False)[0]
+            state.board.pop()
+            if null_score >= beta:
+                stats.cutoffs += 1
+                return beta, None
+
     best_score = -INF
     best_move = None
     legal_moves = list(state.legal_moves())
     pv_move = pv[ply] if pv and ply < len(pv) else None
     ordered_moves = order_moves(state, legal_moves, ply, pv_move)
+    first = True
+    move_number = 0
     for move in ordered_moves:
         state.push(move)
-        score, _ = alphabeta(state, depth - 1, -beta, -alpha, ply + 1, pv, False)
-        score = -score
+        is_quiet = not state.board.is_capture(move) and not state.board.gives_check(move)
+        if root or first:
+            # PVS: search first move (or root) with full window
+            score, _ = alphabeta(state, depth - 1, -beta, -alpha, ply + 1, pv, False)
+            score = -score
+        elif is_quiet and move_number >= 3 and depth > 2:
+            # Late Move Reductions (LMR) for quiet moves after first 3
+            reduction = 1 + (move_number // 6)
+            reduced_depth = max(1, depth - reduction)
+            score, _ = alphabeta(state, reduced_depth, -alpha - 1, -alpha, ply + 1, pv, False)
+            score = -score
+            if score > alpha:
+                # Re-search at full depth
+                score, _ = alphabeta(state, depth - 1, -alpha - 1, -alpha, ply + 1, pv, False)
+                score = -score
+                if score > alpha and score < beta:
+                    # Re-search with full window if null window hit
+                    score, _ = alphabeta(state, depth - 1, -beta, -alpha, ply + 1, pv, False)
+                    score = -score
+        else:
+            # PVS: null window search
+            score, _ = alphabeta(state, depth - 1, -alpha - 1, -alpha, ply + 1, pv, False)
+            score = -score
+            if score > alpha and score < beta:
+                # Re-search with full window
+                score, _ = alphabeta(state, depth - 1, -beta, -alpha, ply + 1, pv, False)
+                score = -score
         state.pop()
         if score > best_score:
             best_score = score
@@ -106,6 +146,8 @@ def alphabeta(state: GameState, depth: int, alpha: int, beta: int, ply: int = 0,
             if not state.board.is_capture(move):
                 history_heuristic[(move.from_square, move.to_square)] = history_heuristic.get((move.from_square, move.to_square), 0) + depth * depth
             break
+        first = False
+        move_number += 1
     # Store TT
     flag = 'EXACT' if best_score > alpha and best_score < beta else ('LOWER' if best_score >= beta else 'UPPER')
     tt[key] = TTEntry(key, depth, best_score, flag, best_move)
@@ -132,8 +174,18 @@ def quiesce(state: GameState, alpha: int, beta: int, stats: Optional[SearchStats
                 alpha = score
     return alpha
 
-def find_best_move(state: GameState, max_depth: int = 5, time_limit_s: float = 5.0) -> SearchStats:
-    """Iterative deepening with PV move ordering and TT, returns SearchStats. Uses book if available."""
+import concurrent.futures
+import multiprocessing
+import os
+
+def find_best_move(state: GameState, max_depth: int = 5, time_limit_s: float = 5.0, threads: int = None, aspiration_window: int = 50) -> SearchStats:
+    """
+    Parallel root search: Each root move is searched in parallel at depth-1. Uses shared TT. Returns SearchStats.
+    Implements:
+      - Iterative deepening with aspiration windows
+      - Optional parallelization
+      - Full integration with V3 evaluation
+    """
     try:
         from strong_chess_ai.core import book
         book_move = book.lookup(state)
@@ -146,13 +198,67 @@ def find_best_move(state: GameState, max_depth: int = 5, time_limit_s: float = 5
     pv = []
     start_time = time.time()
     best_move = None
+    threads = threads or os.cpu_count() or 1
+    prev_score = 0
     for depth in range(1, max_depth + 1):
         alphabeta.stats = stats
         pv = []
-        score, move = alphabeta(state, depth, -INF, INF, 0, pv, True)
-        stats.depth = depth
-        best_move = move
+        legal_moves = list(state.legal_moves())
+        ordered_moves = order_moves(state, legal_moves, 0, None)
+        results = []
+        stop_flag = multiprocessing.Event()
+        def search_move(move):
+            if stop_flag.is_set():
+                return (-INF, move)
+            state_copy = GameState()
+            state_copy.board = state.board.copy()
+            state_copy.move_history = list(state.move_history)
+            state_copy.zobrist = state.zobrist
+            state_copy.push(move)
+            score, _ = alphabeta(state_copy, depth - 1, -INF, INF, 1, None, False)
+            return (-score, move)
+        # Aspiration window search
+        alpha = prev_score - aspiration_window
+        beta = prev_score + aspiration_window
+        fail_high = fail_low = False
+        if threads > 1:
+            with concurrent.futures.ThreadPoolExecutor(max_workers=threads) as executor:
+                future_to_move = {executor.submit(search_move, move): move for move in ordered_moves}
+                for future in concurrent.futures.as_completed(future_to_move):
+                    if time.time() - start_time > time_limit_s:
+                        stop_flag.set()
+                        break
+                    score, move = future.result()
+                    results.append((score, move))
+            if results:
+                results.sort(key=lambda x: x[0], reverse=True)
+                best_score, best_move = results[0]
+                stats.depth = depth
+                pv = [best_move]
+            else:
+                # fallback to sequential if no results
+                score, move = alphabeta(state, depth, -INF, INF, 0, pv, True)
+                best_move = move
+                stats.depth = depth
+        else:
+            # Sequential aspiration window search
+            while True:
+                score, move = alphabeta(state, depth, alpha, beta, 0, pv, True)
+                if score <= alpha:
+                    alpha -= aspiration_window
+                    fail_low = True
+                elif score >= beta:
+                    beta += aspiration_window
+                    fail_high = True
+                else:
+                    best_move = move
+                    best_score = score
+                    break
+            stats.depth = depth
+            pv = [best_move]
+        prev_score = best_score if 'best_score' in locals() else 0
         if time.time() - start_time > time_limit_s:
             break
     stats.pv = pv[:stats.depth]
     return stats
+
