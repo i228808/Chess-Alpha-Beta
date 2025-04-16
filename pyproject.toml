@@ -1,0 +1,19 @@
+[project]
+name = "strong_chess_ai"
+version = "0.1.0"
+description = "A strong chess AI using python-chess, pygame, and numpy."
+requires-python = ">=3.11"
+
+[tool.black]
+line-length = 88
+
+[project.optional-dependencies]
+dev = [
+    "black",
+    "pytest"
+]
+
+[project.dependencies]
+python-chess = "1.*"
+pygame = "2.*"
+numpy = "*"
