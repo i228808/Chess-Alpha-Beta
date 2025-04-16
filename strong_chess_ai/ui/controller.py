@@ -3,6 +3,8 @@ import chess
 from .resources import play_sound, SOUND_MOVE, SOUND_CAPTURE
 from strong_chess_ai.core.board import GameState
 from strong_chess_ai.core.search import find_best_move
+import logging
+
 
 class ChessController:
     def __init__(self, view, threads=None):
@@ -13,71 +15,69 @@ class ChessController:
         self.ai_thread = None
         self.flipped = False
         self.move_history = []
-        self.lock = threading.Lock()
+        self.lock = threading.RLock()  # Reentrant lock for thread safety
+        self.search_stats = None  # Holds latest SearchStats from the search module
+
+    def is_ai_thinking(self) -> bool:
+        """
+        Returns True if the AI thread is currently active.
+        """
+        return self.ai_thread is not None and self.ai_thread.is_alive()
 
     def make_human_move(self, move):
-        import logging
-        logging.basicConfig(level=logging.INFO)
         with self.lock:
-            logging.info(f"Human move: {move}")
+            # Ensure only one move is made at a time and no race conditions
+            move_number = self.state.board.fullmove_number
             if move not in self.state.legal_moves():
                 logging.error(f"Attempted illegal move: {move}")
                 return
-            san = self.state.board.san(move)
             capture = self.state.board.is_capture(move)
+            san = self.state.board.san(move)
             self.state.push(move)
             play_sound(SOUND_CAPTURE if capture else SOUND_MOVE)
             self.move_history.append(san)
-            self.view.side_panel.update_moves(self.move_history)
-            self.view.board.redraw()
-            self.view.update_status()
-            if not self.state.is_terminal():
-                self.view.after(100, self.spawn_ai)
-            if not self.state.board.is_valid():
-                logging.error("Board state is invalid after human move!")
 
+        # UI updates are scheduled on the main thread using after() to avoid blocking
+        self.view.after(0, self.view.side_panel.update_moves, self.move_history)
+        self.view.after(0, self.view.board.redraw)
+        self.view.after(0, self.view.update_status)
+
+        # Spawn AI to make a move if the game is not over
+        if not self.state.is_terminal():
+            self.view.after(100, self.spawn_ai)
 
     def spawn_ai(self):
-        import logging
-        import time
-        logging.basicConfig(level=logging.INFO)
         def ai_move():
             try:
-                logging.info("AI thread started.")
-                # Diagnostic printout
-                print("[AI DEBUG] Position FEN:", self.state.board.fen())
-                print("[AI DEBUG] Turn:", 'White' if self.state.board.turn else 'Black')
-                print("[AI DEBUG] Legal moves:", list(self.state.legal_moves()))
-                print("[AI DEBUG] is_terminal:", self.state.is_terminal())
-                t0 = time.time()
+                # Run the AI logic in a separate thread
                 result = find_best_move(self.state, max_depth=self.depth, time_limit_s=3.0, threads=self.threads)
-                elapsed = time.time() - t0
-                if elapsed > 10.0:
-                    logging.warning(f"AI move took unusually long: {elapsed:.2f}s")
-                move = result.pv[0] if result.pv else None
-                if move:
+                if result.pv:
+                    move = result.pv[0]
                     with self.lock:
-                        logging.info(f"AI move: {move}")
-                        if move not in self.state.legal_moves():
-                            logging.error(f"AI attempted illegal move: {move}")
-                            return
-                        san = self.state.board.san(move)
                         capture = self.state.board.is_capture(move)
+                        san = self.state.board.san(move)
                         self.state.push(move)
                         play_sound(SOUND_CAPTURE if capture else SOUND_MOVE)
                         self.move_history.append(san)
-                        self.view.side_panel.update_moves(self.move_history)
-                        self.view.board.redraw()
-                        self.view.update_status()
-                        if not self.state.board.is_valid():
-                            logging.error("Board state is invalid after AI move!")
-                        # Diagnostic: print human turn, legal moves, and terminal state
-                        print("[AFTER AI] Turn:", 'White' if self.state.board.turn else 'Black')
-                        print("[AFTER AI] Legal moves:", list(self.state.legal_moves()))
-                        print("[AFTER AI] is_terminal:", self.state.is_terminal())
-                logging.info("AI thread finished.")
+                        self.search_stats = result
+
+                    # UI updates
+                    self.view.after(0, self.view.side_panel.update_moves, self.move_history)
+                    self.view.after(0, self.view.board.redraw)
+                    self.view.after(0, self.view.update_status)
+
+                    # Game over check
+                    if self.state.is_terminal():
+                        self.view.after(0, lambda: self.view.show_game_over("Game Over"))
             except Exception as e:
-                logging.exception(f"Exception in AI thread: {e}")
+                logging.error(f"Error in AI move: {e}")
+
+        # Only allow one AI thread at a time
+        if self.ai_thread is not None and self.ai_thread.is_alive():
+            logging.warning("AI is already thinking...")
+            return
+
+        # Create and start AI thread
         self.ai_thread = threading.Thread(target=ai_move, daemon=True)
         self.ai_thread.start()
 
@@ -93,7 +93,7 @@ class ChessController:
 
     def flip_board(self):
         self.flipped = not self.flipped
-        # Not implemented: would require board redraw logic
+        self.view.board.redraw()
 
     def increase_depth(self):
         self.depth += 1

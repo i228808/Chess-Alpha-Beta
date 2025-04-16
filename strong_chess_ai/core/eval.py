@@ -40,6 +40,14 @@ import chess
 import numpy as np
 from typing import Literal
 
+def material(board: chess.Board) -> int:
+    """
+    Return material balance in centipawns (White minus Black).
+    """
+    return sum(PIECE_VALUES_CP[pt] * (len(board.pieces(pt, chess.WHITE)) - len(board.pieces(pt, chess.BLACK)))
+               for pt in PIECE_VALUES_CP)
+
+
 # -------------------------------
 # Base piece values and PST arrays
 # -------------------------------
