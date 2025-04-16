@@ -1,12 +1,7 @@
 """
-Search module for strong_chess_ai: implements iterative deepening alpha-beta with PV, TT,
-killer/history heuristics, and MVV/LVA ordering.
-
-This version (Search Engine V3) is tightly integrated with our tapered evaluation module
-(from eval.py) so that all leaf evaluations use ce.tapered_eval(board), which blends midgame 
-and endgame evaluations. The search engine employs iterative deepening, null-move pruning,
-late-move reductions (LMR), aspiration windows, a transposition table (TT), and optional 
-parallelization at the root level.
+# Name: Abdullah Mansoor, Roll Number: i228808
+This module handles the main search logic for Strong Chess AI.
+It implements iterative deepening, alpha-beta pruning, and other standard chess engine techniques.
 """
 
 from dataclasses import dataclass
@@ -43,17 +38,25 @@ killer_moves: List[List[Optional[chess.Move]]] = [[None, None] for _ in range(DE
 history_heuristic: Dict[Tuple[int, int], int] = {}
 
 def update_killers_and_history(move, depth, is_quiet, fail_high):
+    """
+    Update killer moves and history heuristic.
+    
+    If the move is quiet and fails high, and the depth is less than DEPTH_MAX,
+    update the killer moves and history heuristic.
+    """
     if is_quiet and fail_high and depth < DEPTH_MAX:
         killers = killer_moves[depth]
-        if move not in killers:
-            killer_moves[depth][1] = killer_moves[depth][0]
-            killer_moves[depth][0] = move
+        # Update killer moves
+        killer_moves[depth][1] = killer_moves[depth][0]
+        killer_moves[depth][0] = move
+        # Update history heuristic
         key = (move.from_square, move.to_square)
         history_heuristic[key] = history_heuristic.get(key, 0) + depth * depth
 
 def mvv_lva(move: chess.Move, board: chess.Board) -> int:
     """
     MVV-LVA (Most Valuable Victim - Least Valuable Aggressor) heuristic.
+    
     Returns 10 * (victim's value) - (attacker's value) using ce.PIECE_VALUES_CP.
     """
     if not board.is_capture(move):
@@ -66,6 +69,15 @@ def mvv_lva(move: chess.Move, board: chess.Board) -> int:
     return 10 * ce.PIECE_VALUES_CP[victim] - ce.PIECE_VALUES_CP.get(attacker, 0)
 
 def order_moves(state: GameState, moves: List[chess.Move], depth: int, pv_move: Optional[chess.Move]) -> List[chess.Move]:
+    """
+    Order moves based on their scores.
+    
+    The score is determined by the following factors:
+    - PV move: 1000000
+    - Capture move: 500000 + MVV-LVA score
+    - Killer move: 200000
+    - History heuristic: score from history_heuristic dictionary
+    """
     def score(move: chess.Move) -> int:
         if pv_move and move == pv_move:
             return 1000000
@@ -78,6 +90,11 @@ def order_moves(state: GameState, moves: List[chess.Move], depth: int, pv_move: 
     return sorted(moves, key=score, reverse=True)
 
 def alphabeta(state: GameState, depth: int, alpha: int, beta: int, ply: int = 0, pv: Optional[List[chess.Move]] = None, root: bool = False) -> Tuple[int, Optional[chess.Move]]:
+    """
+    Alpha-beta pruning algorithm.
+    
+    This function performs a depth-first search of the game tree, pruning branches that will not affect the final decision.
+    """
     stats = alphabeta.stats
     stats.nodes += 1
     key = state.zobrist

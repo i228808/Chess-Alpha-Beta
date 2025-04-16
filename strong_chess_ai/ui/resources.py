@@ -4,15 +4,18 @@ import tkinter as tk
 import wave
 import contextlib
 
-# Directory containing asset files (images and sounds)
+# Define the path to the directory containing all asset files, such as images and sounds.
 ASSETS_DIR = os.path.join(os.path.dirname(__file__), "assets")
 
-# Board and UI dimensions
+# Set the dimensions for the Strong Chess AI GUI.
+# The size of each square on the board is 80 pixels.
 SQUARE_SIZE = 80
+# The total size of the board is 8 squares by 8 squares.
 BOARD_SIZE = SQUARE_SIZE * 8
+# The width of the side panel is 200 pixels.
 SIDE_PANEL_WIDTH = 200
 
-# Board colors for light and dark squares
+# Define the colors used for light and dark squares on the board.
 LIGHT = "#f0d9b5"
 DARK = "#b58863"
 

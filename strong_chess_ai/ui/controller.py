@@ -37,19 +37,22 @@ class ChessController:
             play_sound(SOUND_CAPTURE if capture else SOUND_MOVE)
             self.move_history.append(san)
 
-        # UI updates are scheduled on the main thread using after() to avoid blocking
+        # Update the UI to reflect the new move
         self.view.after(0, self.view.side_panel.update_moves, self.move_history)
         self.view.after(0, self.view.board.redraw)
         self.view.after(0, self.view.update_status)
 
-        # Spawn AI to make a move if the game is not over
+        # If the game is not over, trigger the AI to make its move
         if not self.state.is_terminal():
             self.view.after(100, self.spawn_ai)
 
     def spawn_ai(self):
+        """
+        Triggers the AI to make its move in a separate thread.
+        """
         def ai_move():
             try:
-                # Run the AI logic in a separate thread
+                # Run the AI logic in a separate thread to avoid blocking the UI
                 result = find_best_move(self.state, max_depth=self.depth, time_limit_s=3.0, threads=self.threads)
                 if result.pv:
                     move = result.pv[0]

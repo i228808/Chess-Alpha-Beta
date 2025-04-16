@@ -1,1 +1,0 @@
-# GUI removed for redesign.

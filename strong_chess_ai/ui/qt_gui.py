@@ -1,5 +1,7 @@
-# Modern PyQt6 Chess GUI for strong_chess_ai
-# Author: Cascade AI
+# Name: Abdullah Mansoor, Roll Number: i228808
+# Assignment 3 AAI
+# Assignment 3: Solve chess via Alpha Beta Pruning 
+# This file implements the main graphical user interface for playing chess against the AI.
 
 import sys
 from PyQt6.QtWidgets import (
@@ -31,8 +33,8 @@ class ChessBoardWidget(QWidget):
         self.move_callback = None
 
     def load_piece_pixmaps(self):
-        # Use Unicode as fallback, but can load images from resources if available
-        # For now, just return empty dict
+        # This function is a placeholder for loading piece images.
+        # Currently, it just returns an empty dictionary, but you can extend it to load custom graphics.
         return {}
 
     def square_at(self, pos):
@@ -55,7 +57,7 @@ class ChessBoardWidget(QWidget):
         light = QColor(240, 217, 181)
         dark = QColor(181, 136, 99)
         highlight = QColor(100, 200, 255, 128)
-        # Draw squares
+        # Draw the chessboard squares, alternating colors.
         for rank in range(8):
             for file in range(8):
                 sq = chess.square(file, 7 - rank) if not self.flipped else chess.square(7 - file, rank)
@@ -65,7 +67,7 @@ class ChessBoardWidget(QWidget):
                     painter.fillRect(file * square_size, rank * square_size, square_size, square_size, highlight)
                 elif sq in self.legal_moves:
                     painter.fillRect(file * square_size, rank * square_size, square_size, square_size, QColor(180,255,180,100))
-        # Draw pieces
+        # Draw the chess pieces using Unicode symbols.
         font = QFont("Arial", square_size // 2)
         painter.setFont(font)
         for sq in chess.SQUARES:
@@ -86,7 +88,7 @@ class ChessBoardWidget(QWidget):
             }[symbol]
             painter.setPen(QPen(Qt.GlobalColor.black if piece.color == chess.BLACK else Qt.GlobalColor.white))
             painter.drawText(QRect(x, y, square_size, square_size), Qt.AlignmentFlag.AlignCenter, uni)
-        # Draw dragged piece
+        # If a piece is being dragged, draw it following the mouse cursor.
         if self.drag_piece and self.drag_pixmap and self.drag_offset:
             painter.drawPixmap(self.mapFromGlobal(self.cursor().pos()) - self.drag_offset, self.drag_pixmap)
 
@@ -135,7 +137,7 @@ class ChessBoardWidget(QWidget):
 class ChessMainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("Strong Chess AI - PyQt6 Edition")
+        self.setWindowTitle("i228808 Abdullah Mansoor Assignment#3")
         self.setMinimumSize(900, 600)
         self.board_widget = ChessBoardWidget()
         self.move_list = QListWidget()
@@ -146,11 +148,18 @@ class ChessMainWindow(QMainWindow):
         self.new_game_btn = QPushButton("New Game")
         self.depth_slider = QSlider(Qt.Orientation.Horizontal)
         self.depth_slider.setMinimum(1)
-        self.depth_slider.setMaximum(8)
+        self.depth_slider.setMaximum(50)
         self.depth_slider.setValue(4)
         self.depth_slider.setTickInterval(1)
         self.depth_slider.setTickPosition(QSlider.TickPosition.TicksBelow)
         self.depth_label = QLabel("AI Depth: 4")
+        self.time_label = QLabel("Time Limit: 3s")
+        self.time_slider = QSlider(Qt.Orientation.Horizontal)
+        self.time_slider.setMinimum(1)
+        self.time_slider.setMaximum(30)
+        self.time_slider.setValue(3)
+        self.time_slider.setTickInterval(1)
+        self.time_slider.setTickPosition(QSlider.TickPosition.TicksBelow)
         self.dark_mode_btn = QPushButton("Dark Mode")
         self.export_pgn_btn = QPushButton("Export PGN")
         self.import_pgn_btn = QPushButton("Import PGN")
@@ -176,6 +185,8 @@ class ChessMainWindow(QMainWindow):
         right.addWidget(self.new_game_btn)
         right.addWidget(self.depth_label)
         right.addWidget(self.depth_slider)
+        right.addWidget(self.time_label)
+        right.addWidget(self.time_slider)
         right.addWidget(self.dark_mode_btn)
         right.addWidget(self.export_pgn_btn)
         right.addWidget(self.import_pgn_btn)
@@ -192,6 +203,7 @@ class ChessMainWindow(QMainWindow):
         self.redo_btn.clicked.connect(self._on_redo)
         self.new_game_btn.clicked.connect(self._on_new_game)
         self.depth_slider.valueChanged.connect(self._on_depth_change)
+        self.time_slider.valueChanged.connect(self._on_time_change)
         self.dark_mode_btn.clicked.connect(self._on_dark_mode)
         self.export_pgn_btn.clicked.connect(self._on_export_pgn)
         self.import_pgn_btn.clicked.connect(self._on_import_pgn)
@@ -232,11 +244,12 @@ class ChessMainWindow(QMainWindow):
         class AiWorker(QObject):
             move_found = pyqtSignal(object, str)
             error = pyqtSignal(str)
-            def __init__(self, board, move_stack, depth):
+            def __init__(self, board, move_stack, depth, time_limit):
                 super().__init__()
                 self.board = board.copy()
                 self.move_stack = list(move_stack)
                 self.depth = depth
+                self.time_limit = time_limit
             def run(self):
                 try:
                     from strong_chess_ai.core.board import GameState
@@ -244,7 +257,7 @@ class ChessMainWindow(QMainWindow):
                     state = GameState()
                     state.board = self.board
                     state.move_history = self.move_stack
-                    result = find_best_move(state, max_depth=self.depth, time_limit_s=3.0)
+                    result = find_best_move(state, max_depth=self.depth, time_limit_s=self.time_limit)
                     if result.pv:
                         move = result.pv[0]
                         san = self.board.san(move)
@@ -256,7 +269,7 @@ class ChessMainWindow(QMainWindow):
                     self.error.emit(str(e))
 
         self.ai_thread = QThread()
-        self.ai_worker = AiWorker(self.board, self.board.move_stack, self.depth_slider.value())
+        self.ai_worker = AiWorker(self.board, self.board.move_stack, self.depth_slider.value(), self.time_slider.value())
         self.ai_worker.moveToThread(self.ai_thread)
         self.ai_thread.started.connect(self.ai_worker.run)
         self.ai_worker.move_found.connect(self.on_ai_move_found)
@@ -352,7 +365,7 @@ class ChessMainWindow(QMainWindow):
             self.status_label.setText(f"{'White' if self.board.turn == chess.WHITE else 'Black'} to move")
 
     def _on_redo(self):
-        # Redo logic for popped moves
+        # TODO: Implement redo functionality for undone moves.
         pass
 
     def _on_new_game(self):
@@ -360,10 +373,14 @@ class ChessMainWindow(QMainWindow):
 
     def _on_depth_change(self, value):
         self.depth_label.setText(f"AI Depth: {value}")
-        # TODO: Update AI search depth
+        # This updates the label to reflect the current AI search depth.
+
+    def _on_time_change(self, value):
+        self.time_label.setText(f"Time Limit: {value}s")
+        # This updates the label to reflect the current AI time limit.
 
     def _on_dark_mode(self):
-        # Toggle dark mode
+        # TODO: Implement dark mode toggle for the GUI.
         pass
 
     def _on_export_pgn(self):
@@ -393,11 +410,11 @@ class ChessMainWindow(QMainWindow):
             self.status_label.setText(f"{'White' if self.board.turn == chess.WHITE else 'Black'} to move")
 
     def _on_hint(self):
-        # TODO: Integrate with AI for best move
+        # TODO: Implement hint functionality using the AI engine.
         QMessageBox.information(self, "Hint", "Hint feature coming soon!")
 
     def _on_move_selected(self, item):
-        # TODO: Allow navigation to selected move
+        # TODO: Add support for jumping to a specific move in the move list.
         pass
 
 # --- Entry Point ---

@@ -64,15 +64,16 @@ def build_polyglot(pgn_path: str, max_moves: int = 12, output_path: str = BOOK_F
     Build a Polyglot-style book from a PGN file. For each game in the PGN,
     process moves up to max_moves (plies) and record move frequency counts.
     
-    Args:
-        pgn_path (str): Path to the PGN file containing chess games.
-        max_moves (int, optional): Maximum number of moves (plies) from the start of each game. Defaults to 12.
-        output_path (str, optional): Path to the output book file. Defaults to BOOK_FILE.
+    This function reads through a PGN file, processes each game, and builds a 
+    dictionary of position keys to move frequency counts.
     """
     # Initialize the book as a dictionary: key -> {move: count}
+    # This dictionary will store the frequency counts for each move in each position.
     book: defaultdict[int, defaultdict[chess.Move, int]] = defaultdict(lambda: defaultdict(int))
     
+    # Open the PGN file for reading
     with open(pgn_path, "r", encoding="utf-8") as pgn_file:
+        # Read through the PGN file game by game
         while True:
             game = chess.pgn.read_game(pgn_file)
             if game is None:
@@ -124,7 +125,8 @@ def lookup(state) -> Optional[chess.Move]:
                     entries.append((entry.move, entry.count))
         if entries:
             moves, weights = zip(*entries)
-            # Choose one move randomly with the given weights
+            # Name: Abdullah Mansoor, Roll Number: i228808
+# Pick a move at random based on how often it appears in the book.
             return random.choices(list(moves), weights=list(weights))[0]
         return None
     except FileNotFoundError:

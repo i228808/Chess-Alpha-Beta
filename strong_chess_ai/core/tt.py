@@ -32,21 +32,9 @@ class TranspositionTable:
         Store or update an entry in the transposition table.
 
         If an entry for the key already exists and its recorded depth is greater or equal,
-        the new entry will not replace it. Otherwise, the new entry is stored.
-
-        If the table exceeds the maximum allowed entries, one entry is removed at random.
-
-        Args:
-            key (int): Unique hash key for the board position.
-            depth (int): Depth at which the score was computed.
-            score (int): Evaluated score of the position.
-            flag (str): A flag indicating if the score is 'EXACT', a lower bound ('LOWER'),
-                        or an upper bound ('UPPER').
-            best_move (Optional[Any]): The best move from this position, if any.
-        """
         existing_entry = self.table.get(key)
         if existing_entry is not None and existing_entry.depth >= depth:
-            # Do not replace if the existing entry is at least as deep.
+            # If the existing entry is at least as deep, do not replace it.
             return
 
         # If table exceeds capacity, remove a random entry.

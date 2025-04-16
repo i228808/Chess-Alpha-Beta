@@ -1,3 +1,4 @@
+# Name: Abdullah Mansoor, Roll Number: i228808
 """
 Zobrist hashing for fast position keys (for TT).
 
@@ -15,14 +16,11 @@ from typing import Any
 # Set a deterministic random seed for reproducibility.
 np.random.seed(2025)
 
-# Pre-generate Zobrist keys:
-# Dimensions: color (2), piece type (6), squares (64)
+# Pre-generate Zobrist keys for pieces, castling rights, en passant, and turn.
+# These keys are used to create a unique hash for a given board position.
 ZOBRIST_PIECE_KEYS = np.random.randint(0, 2**64, size=(2, 6, 64), dtype=np.uint64)
-# Castling rights: there are 16 possible castling rights combinations.
 ZOBRIST_CASTLING_KEYS = np.random.randint(0, 2**64, size=16, dtype=np.uint64)
-# En passant: one key per file (files a-h).
 ZOBRIST_EP_KEYS = np.random.randint(0, 2**64, size=8, dtype=np.uint64)
-# Turn key: applied if it is Black's turn.
 ZOBRIST_TURN_KEY = np.random.randint(0, 2**64, dtype=np.uint64)
 
 def compute_zobrist(board: chess.Board) -> int:

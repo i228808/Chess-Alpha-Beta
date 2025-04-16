@@ -571,7 +571,8 @@ def tapered_eval(board: chess.Board) -> float:
 
 # -------------------------------
 # Additional (Legacy) Evaluation Functions
-# These functions remain available for comparison or fallback.
+# Name: Abdullah Mansoor, Roll Number: i228808
+# Legacy evaluation functions for reference or backup.
 # -------------------------------
 
 def pawn_structure(board: chess.Board) -> int:
@@ -836,7 +837,7 @@ def evaluate(board: chess.Board) -> int:
         tactical_features(board)
     )
     score = int(w * mg + (1 - w) * eg)
-    # Draw contempt: adjust score to discourage draws
+    # Slightly adjust score to avoid draws when possible.
     if board.is_stalemate() or board.is_insufficient_material() or board.can_claim_draw():
         score += 20 if board.turn == chess.WHITE else -20
     return score

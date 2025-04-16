@@ -1,11 +1,11 @@
+# Name: Abdullah Mansoor, Roll Number: i228808
 """
-Bitboard utilities for fast chess feature extraction (mobility, control, pawn structure, etc).
+Bitboard utilities for Strong Chess AI.
 
-This module provides helper functions that use bitboards to quickly extract and compute
-various chess features. Added functions include:
-  - count_bits: Count set bits in a bitboard.
-  - squares_in_mask: Return a list of squares (0-63) in a bitboard.
-  - king_zone_mask: Compute the 3x3 king zone bitmask given a king's square.
+This module provides helper functions to efficiently extract and compute various chess features using bitboards.
+The functions included are:
+  - count_bits: Counts the number of set bits in a bitboard.
+  - squares_in_mask: Returns a list of squares (0-63) in a bitboard.
   - file_mask: Return the bitmask for an entire file (a-h).
   - rank_mask: Return the bitmask for an entire rank (1-8).
   - bitboard_to_array: Convert a bitboard into an 8x8 numpy boolean array.
