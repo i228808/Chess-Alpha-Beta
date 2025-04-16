@@ -97,6 +97,17 @@ KING_PST_END = np.array([
     -30, -30, 0, 0, 0, 0, -30, -30,
     -50, -30, -30, -30, -30, -30, -30, -50
 ])
+# King centralisation for endgame (distance from center: e4,d4,e5,d5)
+KING_ENDGAME_TABLE = np.array([
+    3, 2, 2, 2, 2, 2, 2, 3,
+    2, 1, 1, 1, 1, 1, 1, 2,
+    2, 1, 0, 0, 0, 0, 1, 2,
+    2, 1, 0, 0, 0, 0, 1, 2,
+    2, 1, 0, 0, 0, 0, 1, 2,
+    2, 1, 0, 0, 0, 0, 1, 2,
+    2, 1, 1, 1, 1, 1, 1, 2,
+    3, 2, 2, 2, 2, 2, 2, 3
+])
 
 PST = {
     chess.PAWN:   {"MID": PAWN_PST_MID,   "END": PAWN_PST_END},
@@ -155,22 +166,31 @@ def is_passed(board: chess.Board, sq: int, color: chess.Color) -> bool:
     if file < 7:
         mask |= chess.BB_FILES[file + 1]
     if color == chess.WHITE:
-        in_front = mask & chess.BB_RANKS_MASKS[rank + 1]
+        in_front = mask & chess.BB_RANK_MASKS[rank + 1]
         for r in range(rank + 1, 8):
-            in_front |= mask & chess.BB_RANKS_MASKS[r]
+            in_front |= mask & chess.BB_RANK_MASKS[r]
         return (board.pawns & board.occupied_co[opp_color] & in_front) == 0
     else:
-        in_front = mask & chess.BB_RANKS_MASKS[rank - 1]
+        in_front = mask & chess.BB_RANK_MASKS[rank - 1]
         for r in range(rank - 1, -1, -1):
-            in_front |= mask & chess.BB_RANKS_MASKS[r]
+            in_front |= mask & chess.BB_RANK_MASKS[r]
         return (board.pawns & board.occupied_co[opp_color] & in_front) == 0
+
+# Global pawn structure cache: {(white_pawns, black_pawns): score}
+pawn_cache = {}
 
 def pawn_structure(board: chess.Board) -> int:
     """Evaluate pawn structure with refined detection for isolated, doubled, and passed pawns.
+    Uses a persistent cache keyed by (white_pawns, black_pawns) bitboards.
     -15 cp per isolated pawn
     -10 cp per doubled pawn (each extra pawn on a file)
     +20/40/80 cp bonus for a passed pawn on rank 5/6/7 (white) or 4/3/2 (black).
     """
+    wp = int(board.pawns & board.occupied_co[chess.WHITE])
+    bp = int(board.pawns & board.occupied_co[chess.BLACK])
+    key = (wp, bp)
+    if key in pawn_cache:
+        return pawn_cache[key]
     score = 0
     for color in [chess.WHITE, chess.BLACK]:
         pawns = board.pieces(chess.PAWN, color)
@@ -199,7 +219,9 @@ def pawn_structure(board: chess.Board) -> int:
                     passed_bonus += 80
         term = -15 * isolated - 10 * doubled + passed_bonus
         score += term if color == chess.WHITE else -term
+    pawn_cache[key] = score
     return score
+
 
 def mobility(board: chess.Board) -> int:
     """Evaluate mobility: number of legal moves (White minus Black)."""
@@ -243,17 +265,55 @@ def phase(board: chess.Board) -> Literal["MID", "END"]:
     non_pawn = sum(len(board.pieces(pt, chess.WHITE)) + len(board.pieces(pt, chess.BLACK)) for pt in [chess.KNIGHT, chess.BISHOP, chess.ROOK, chess.QUEEN])
     return "END" if non_pawn <= 6 else "MID"
 
+def evaluate_endgame(board: chess.Board) -> int:
+    """Evaluate endgame: king activity, scaled passed pawns, drawn endings (K vs K, KB vs K, KN vs K, KNN vs K)."""
+    # Detect basic drawn endgames
+    pieces = [pt for pt in range(1, 7) for _ in board.pieces(pt, chess.WHITE)] + [pt for pt in range(1, 7) for _ in board.pieces(pt, chess.BLACK)]
+    # Only kings
+    if pieces == [chess.KING, chess.KING]:
+        return 0
+    # K vs K+N
+    if sorted(pieces) in ([chess.KING, chess.KING, chess.KNIGHT], [chess.KING, chess.KING, chess.BISHOP], [chess.KING, chess.KING, chess.KNIGHT, chess.KNIGHT]):
+        return 0
+    score = 0
+    # King activity bonus: -5cp × distance from centre
+    for color in [chess.WHITE, chess.BLACK]:
+        king_sq = board.king(color)
+        if king_sq is not None:
+            dist = KING_ENDGAME_TABLE[king_sq]
+            bonus = -5 * dist
+            score += bonus if color == chess.WHITE else -bonus
+    # Material and PST
+    score += material(board)
+    score += piece_square(board, "END")
+    # Passed pawns (scaled)
+    for color in [chess.WHITE, chess.BLACK]:
+        pawns = board.pieces(chess.PAWN, color)
+        for sq in pawns:
+            if is_passed(board, sq, color):
+                rank = chess.square_rank(sq) if color == chess.WHITE else 7 - chess.square_rank(sq)
+                if rank == 4:
+                    score += (30 if color == chess.WHITE else -30)
+                elif rank == 5:
+                    score += (60 if color == chess.WHITE else -60)
+                elif rank == 6:
+                    score += (120 if color == chess.WHITE else -120)
+    return score
+
 def evaluate(board: chess.Board) -> int:
-    """Evaluate the board and return centipawn score (White minus Black). Applies draw contempt (+/-20 cp)."""
+    """Evaluate the board and return centipawn score (White minus Black). Applies draw contempt (+/-20 cp). Calls evaluate_endgame() in endgame phase."""
     ph = phase(board)
-    score = (
-        material(board)
-        + piece_square(board, ph)
-        + pawn_structure(board)
-        + mobility(board)
-        + king_safety(board, ph)
-        + rook_placement(board)
-    )
+    if ph == "END":
+        score = evaluate_endgame(board)
+    else:
+        score = (
+            material(board)
+            + piece_square(board, ph)
+            + pawn_structure(board)
+            + mobility(board)
+            + king_safety(board, ph)
+            + rook_placement(board)
+        )
     # Draw contempt: prefer not to draw
     if board.is_stalemate() or board.is_insufficient_material() or board.can_claim_draw():
         score += 20 if board.turn == chess.WHITE else -20
